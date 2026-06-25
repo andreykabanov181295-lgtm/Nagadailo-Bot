@@ -22,9 +22,9 @@ from telegram.ext import (
 import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN")    # Отримай у @BotFather
 
-REMINDER_HOUR   = 9    # Година першого нагадування
+REMINDER_HOUR   = 8    # Година першого нагадування
 REMINDER_MINUTE = 0    # Хвилина першого нагадування
-INTERVAL_MINUTES = 30  # Інтервал між повторними нагадуваннями
+INTERVAL_MINUTES = 60  # Інтервал між повторними нагадуваннями
 
 # ============================================================
 # 💬  ТЕКСТИ — ЕСКАЛАЦІЯ ЗА КІЛЬКІСТЮ НАГАДУВАНЬ
