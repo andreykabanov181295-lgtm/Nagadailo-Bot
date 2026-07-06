@@ -6,7 +6,8 @@ Telegram Ritual Reminder Bot — два кроки
 """
 
 import logging
-from datetime import time
+import random
+from datetime import time, datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -20,27 +21,21 @@ from telegram.ext import (
 # ============================================================
 
 import os
-BOT_TOKEN = os.environ.get("BOT_TOKEN")    # Отримай у @BotFather
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-REMINDER_HOUR   = 5    # Година першого нагадування
-REMINDER_MINUTE = 0    # Хвилина першого нагадування
-INTERVAL_MINUTES = 60  # Інтервал між повторними нагадуваннями
+REMINDER_HOUR    = 5    # 5 UTC = 8 за Києвом
+REMINDER_MINUTE  = 0
+INTERVAL_MINUTES = 60
 
 # ============================================================
-# 💬  ТЕКСТИ — ЕСКАЛАЦІЯ ЗА КІЛЬКІСТЮ НАГАДУВАНЬ
+# 💬  ТЕКСТИ
 # ============================================================
 
-# Індекс = кількість вже надісланих нагадувань (0, 1, 2, 3+)
 REMINDERS = [
-    # 0 — перше, м'яке
     "Йо, братуха! 👋\n\nЧас для щоденного ритуалу:\n💊 Таблетки\n💈 Спрей для волосся\n\nЗроби та відміч нижче 👇",
-    # 1 — друге, вже серйозніше
     "Чуєш, чебурек, ти шо мене не поняв? 😑\n\nТаблетки та спрей самі себе не зроблять.\nТикай кнопку як зробиш 👇",
-    # 2 — третє, підвищений тон
     "Слухай, кабан, я вже вдруге кажу — шевелись! 🐗\n\nЩо незрозуміло? Таблетки. Спрей. Кнопка. Три дії.",
-    # 3 — четверте, дуже незадоволений
     "ТРЕТІЙ РАЗ ПИШУ! ТРЕТІЙ! 🤌\n\nТи тут взагалі є, чи шо? Відгукнись, людино.\nТаблетки + спрей = свобода від моїх повідомлень.",
-    # 4+ — максимальна ескалація
     "Дивись, я ввічливий, але ти мою ввічливість не цінуєш. 😤\n\nЯ не відстану — ти ж мене знаєш.\nТАБЛЕТКИ. СПРЕЙ. ВСЕ.",
 ]
 
@@ -51,7 +46,6 @@ LATE_REMINDERS = [
     "Слухай, я не сплю через тебе вже який час. 😤\n\nОстанній раз питаю по-людськи:\n\n💊 Таблетки\n💈 Спрей",
 ]
 
-# Підтвердження однієї дії
 CONFIRM_ONE = {
     "pills": [
         "Таблетки — зачот. 💊 Тепер спрей, не розслабляйся.",
@@ -65,7 +59,6 @@ CONFIRM_ONE = {
     ],
 }
 
-# Підтвердження всього ритуалу
 CONFIRM_ALL = [
     "О, живий! Все зроблено, молодець. Уважаю. 💪\nЗавтра знову перевірю, не розслабляйся.",
     "Ну нарєшті. Думав, ти там помер. Красава! 🎉\nМожеш іти гуляти — заслужив.",
@@ -81,7 +74,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Стан користувачів: { chat_id: {"pills": bool, "spray": bool, "count": int} }
 user_state: dict[int, dict] = {}
 
 
@@ -110,19 +102,13 @@ def get_reminder_text(chat_id: int, hour: int = None) -> str:
     s = get_state(chat_id)
     count = s["count"]
 
-    # Пізній час — спеціальний текст
     if hour is not None and hour >= 22:
-    import random
-    return random.choice(LATE_REMINDERS)
-    
-    # Ескалація
-    if count >= len(REMINDERS):
-    import random
-    base = random.choice(REMINDERS[2:])  # рандом з більш жорстких варіантів
-else:
-    base = REMINDERS[count]
+        base = random.choice(LATE_REMINDERS)
+    elif count >= len(REMINDERS):
+        base = random.choice(REMINDERS[2:])
+    else:
+        base = REMINDERS[count]
 
-    # Якщо одна дія вже зроблена — уточнення
     if s["pills"] and not s["spray"]:
         base += "\n\n✅ Таблетки вже є. Залишився спрей 💈"
     elif s["spray"] and not s["pills"]:
@@ -141,9 +127,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
     if is_done(chat_id):
         return
 
-    from datetime import datetime
     hour = datetime.now().hour
-
     s = get_state(chat_id)
     text = get_reminder_text(chat_id, hour)
     keyboard = get_keyboard(chat_id)
@@ -165,7 +149,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = query.message.chat_id
     s = get_state(chat_id)
-    data = query.data  # "done_pills" або "done_spray"
+    data = query.data
 
     if data == "done_pills":
         s["pills"] = True
@@ -177,12 +161,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if is_done(chat_id):
-        # Обидві дії виконано
         text = pick(CONFIRM_ALL, s["count"])
         await query.edit_message_text(f"🎉 {text}")
         logger.info(f"[{chat_id}] Ритуал повністю виконано")
     else:
-        # Одна дія виконана, інша залишилась
         text = pick(CONFIRM_ONE[key], s["count"])
         await query.edit_message_text(text, reply_markup=get_keyboard(chat_id))
 
@@ -191,24 +173,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_state[chat_id] = {"pills": False, "spray": False, "count": 0}
 
-    # Очищаємо старі задачі
     for suffix in ["", "_repeat", "_reset"]:
         for job in context.job_queue.get_jobs_by_name(f"{chat_id}{suffix}"):
             job.schedule_removal()
 
     # Щоденне перше нагадування
-    context.job_queue.run_repeating(
-    send_reminder,
-    interval=INTERVAL_MINUTES * 60,
-    first=None,
-    chat_id=chat_id,
-    name=f"{chat_id}_repeat",
+    context.job_queue.run_daily(
+        send_reminder,
+        time=time(REMINDER_HOUR, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=str(chat_id),
     )
     # Повторні нагадування
     context.job_queue.run_repeating(
         send_reminder,
         interval=INTERVAL_MINUTES * 60,
-        first=INTERVAL_MINUTES * 60,
+        first=None,
         chat_id=chat_id,
         name=f"{chat_id}_repeat",
     )
@@ -222,7 +202,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"✅ Бот запущено, братуха!\n\n"
-        f"📅 Перше нагадування: щодня о {REMINDER_HOUR:02d}:{REMINDER_MINUTE:02d}\n"
+        f"📅 Перше нагадування: щодня о {REMINDER_HOUR + 3:02d}:{REMINDER_MINUTE:02d} за Києвом\n"
         f"🔁 Повтор: кожні {INTERVAL_MINUTES} хвилин\n\n"
         f"Щодня чекаю підтвердження двох дій:\n"
         f"💊 Таблетки\n"
