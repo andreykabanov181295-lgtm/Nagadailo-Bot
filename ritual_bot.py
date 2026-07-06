@@ -23,7 +23,7 @@ from telegram.ext import (
 import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-REMINDER_HOUR    = 5    # 5 UTC = 8 за Києвом
+REMINDER_HOUR    = 6    # 6 UTC = 9 за Києвом
 REMINDER_MINUTE  = 0
 INTERVAL_MINUTES = 60
 
