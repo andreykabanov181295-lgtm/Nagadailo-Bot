@@ -22,7 +22,7 @@ from telegram.ext import (
 import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN")    # Отримай у @BotFather
 
-REMINDER_HOUR   = 8    # Година першого нагадування
+REMINDER_HOUR   = 5    # Година першого нагадування
 REMINDER_MINUTE = 0    # Хвилина першого нагадування
 INTERVAL_MINUTES = 60  # Інтервал між повторними нагадуваннями
 
@@ -112,11 +112,15 @@ def get_reminder_text(chat_id: int, hour: int = None) -> str:
 
     # Пізній час — спеціальний текст
     if hour is not None and hour >= 22:
-        return pick(LATE_REMINDERS, s["count"])
-
+    import random
+    return random.choice(LATE_REMINDERS)
+    
     # Ескалація
-    idx = min(count, len(REMINDERS) - 1)
-    base = REMINDERS[idx]
+    if count >= len(REMINDERS):
+    import random
+    base = random.choice(REMINDERS[2:])  # рандом з більш жорстких варіантів
+else:
+    base = REMINDERS[count]
 
     # Якщо одна дія вже зроблена — уточнення
     if s["pills"] and not s["spray"]:
@@ -193,11 +197,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             job.schedule_removal()
 
     # Щоденне перше нагадування
-    context.job_queue.run_daily(
-        send_reminder,
-        time=time(REMINDER_HOUR, REMINDER_MINUTE),
-        chat_id=chat_id,
-        name=str(chat_id),
+    context.job_queue.run_repeating(
+    send_reminder,
+    interval=INTERVAL_MINUTES * 60,
+    first=None,
+    chat_id=chat_id,
+    name=f"{chat_id}_repeat",
     )
     # Повторні нагадування
     context.job_queue.run_repeating(
