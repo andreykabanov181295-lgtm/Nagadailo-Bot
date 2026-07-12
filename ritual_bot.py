@@ -7,7 +7,9 @@ Telegram Ritual Reminder Bot — два кроки
 
 import logging
 import random
-from datetime import time, datetime
+import json
+import os
+from datetime import time, datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -20,12 +22,13 @@ from telegram.ext import (
 # ⚙️  НАЛАШТУВАННЯ
 # ============================================================
 
-import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-REMINDER_HOUR    = 6    # 6 UTC = 9 за Києвом
+REMINDER_HOUR    = 6     # 6 UTC = 8 за Римом (UTC+2)
 REMINDER_MINUTE  = 0
 INTERVAL_MINUTES = 60
+
+STATE_FILE = "/tmp/bot_state.json"
 
 # ============================================================
 # 💬  ТЕКСТИ
@@ -76,6 +79,39 @@ logger = logging.getLogger(__name__)
 
 user_state: dict[int, dict] = {}
 
+# ============================================================
+# 💾  ЗБЕРЕЖЕННЯ СТАНУ
+# ============================================================
+
+def save_state():
+    try:
+        serializable = {str(k): v for k, v in user_state.items()}
+        with open(STATE_FILE, "w") as f:
+            json.dump(serializable, f)
+    except Exception as e:
+        logger.error(f"Помилка збереження стану: {e}")
+
+
+def load_state():
+    global user_state
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                data = json.load(f)
+                user_state = {int(k): v for k, v in data.items()}
+                logger.info(f"Стан завантажено: {len(user_state)} юзерів")
+    except Exception as e:
+        logger.error(f"Помилка завантаження стану: {e}")
+
+# ============================================================
+# 🔧  ДОПОМІЖНІ ФУНКЦІЇ
+# ============================================================
+
+def get_rome_hour() -> int:
+    """Повертає поточну годину за Римом (UTC+2)."""
+    rome_time = datetime.now(timezone(timedelta(hours=2)))
+    return rome_time.hour
+
 
 def get_state(chat_id: int) -> dict:
     if chat_id not in user_state:
@@ -121,27 +157,125 @@ def pick(lst: list, index: int) -> str:
     return lst[index % len(lst)]
 
 
+def register_jobs(context, chat_id: int):
+    """Реєструє всі задачі для юзера."""
+    for suffix in ["", "_repeat", "_reset"]:
+        for job in context.job_queue.get_jobs_by_name(f"{chat_id}{suffix}"):
+            job.schedule_removal()
+
+    # Перше нагадування щодня о 6:00 UTC = 8:00 за Римом
+    context.job_queue.run_daily(
+        send_reminder,
+        time=time(REMINDER_HOUR, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=str(chat_id),
+    )
+    # Повторні нагадування кожну годину починаючи з 9:00 UTC = 11:00 за Римом
+    # (тобто через годину після першого)
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 1, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat2",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 2, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat3",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 3, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat4",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 4, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat5",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 5, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat6",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 6, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat7",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 7, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat8",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 8, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat9",
+    )
+    context.job_queue.run_daily(
+        send_repeating_reminder,
+        time=time(REMINDER_HOUR + 9, REMINDER_MINUTE),
+        chat_id=chat_id,
+        name=f"{chat_id}_repeat10",
+    )
+    # Скидання о 00:00 UTC
+    context.job_queue.run_daily(
+        reset_daily,
+        time=time(0, 0),
+        chat_id=chat_id,
+        name=f"{chat_id}_reset",
+    )
+
+# ============================================================
+# 📨  НАГАДУВАННЯ
+# ============================================================
+
 async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
-
     if is_done(chat_id):
         return
-
-    hour = datetime.now().hour
+    hour = get_rome_hour()
     s = get_state(chat_id)
     text = get_reminder_text(chat_id, hour)
     keyboard = get_keyboard(chat_id)
-
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
     s["count"] += 1
+    save_state()
     logger.info(f"[{chat_id}] Нагадування #{s['count']} надіслано")
+
+
+async def send_repeating_reminder(context: ContextTypes.DEFAULT_TYPE):
+    """Повторне нагадування — надсилає тільки якщо не виконано."""
+    chat_id = context.job.chat_id
+    if is_done(chat_id):
+        return
+    hour = get_rome_hour()
+    s = get_state(chat_id)
+    text = get_reminder_text(chat_id, hour)
+    keyboard = get_keyboard(chat_id)
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
+    s["count"] += 1
+    save_state()
+    logger.info(f"[{chat_id}] Повторне нагадування #{s['count']} надіслано")
 
 
 async def reset_daily(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
     user_state[chat_id] = {"pills": False, "spray": False, "count": 0}
+    save_state()
     logger.info(f"[{chat_id}] Стан скинуто на новий день")
 
+# ============================================================
+# 🤖  ОБРОБНИКИ КОМАНД
+# ============================================================
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -160,6 +294,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         return
 
+    save_state()
+
     if is_done(chat_id):
         text = pick(CONFIRM_ALL, s["count"])
         await query.edit_message_text(f"🎉 {text}")
@@ -172,37 +308,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_state[chat_id] = {"pills": False, "spray": False, "count": 0}
+    save_state()
 
-    for suffix in ["", "_repeat", "_reset"]:
-        for job in context.job_queue.get_jobs_by_name(f"{chat_id}{suffix}"):
-            job.schedule_removal()
-
-    # Щоденне перше нагадування
-    context.job_queue.run_daily(
-        send_reminder,
-        time=time(REMINDER_HOUR, REMINDER_MINUTE),
-        chat_id=chat_id,
-        name=str(chat_id),
-    )
-    # Повторні нагадування
-    context.job_queue.run_repeating(
-        send_reminder,
-        interval=INTERVAL_MINUTES * 60,
-        first=None,
-        chat_id=chat_id,
-        name=f"{chat_id}_repeat",
-    )
-    # Скидання о 00:00
-    context.job_queue.run_daily(
-        reset_daily,
-        time=time(0, 0),
-        chat_id=chat_id,
-        name=f"{chat_id}_reset",
-    )
+    register_jobs(context, chat_id)
 
     await update.message.reply_text(
         f"✅ Бот запущено, братуха!\n\n"
-        f"📅 Перше нагадування: щодня о {REMINDER_HOUR + 3:02d}:{REMINDER_MINUTE:02d} за Києвом\n"
+        f"📅 Перше нагадування: щодня о 08:00 за Римом\n"
         f"🔁 Повтор: кожні {INTERVAL_MINUTES} хвилин\n\n"
         f"Щодня чекаю підтвердження двох дій:\n"
         f"💊 Таблетки\n"
@@ -219,6 +331,7 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = get_state(chat_id)
     s["pills"] = True
     s["spray"] = True
+    save_state()
     await update.message.reply_text(
         "✅ Все відмічено як виконано!\nМожеш іти гуляти, заслужив 💪"
     )
@@ -235,12 +348,16 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = f"Статус на сьогодні:\n{pills} Таблетки\n{spray} Спрей"
 
-    await update.message.reply_text(text, reply_markup=None if is_done(chat_id) else get_keyboard(chat_id))
+    await update.message.reply_text(
+        text,
+        reply_markup=None if is_done(chat_id) else get_keyboard(chat_id)
+    )
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    for suffix in ["", "_repeat", "_reset"]:
+    for suffix in ["", "_repeat2", "_repeat3", "_repeat4", "_repeat5",
+                   "_repeat6", "_repeat7", "_repeat8", "_repeat9", "_repeat10", "_reset"]:
         for job in context.job_queue.get_jobs_by_name(f"{chat_id}{suffix}"):
             job.schedule_removal()
     await update.message.reply_text(
@@ -248,8 +365,28 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def post_init(application: Application):
+    """Відновлює задачі для всіх юзерів після перезапуску."""
+    load_state()
+    for chat_id in user_state:
+        try:
+            register_jobs(application, chat_id)
+            logger.info(f"[{chat_id}] Задачі відновлено після перезапуску")
+        except Exception as e:
+            logger.error(f"[{chat_id}] Помилка відновлення: {e}")
+
+# ============================================================
+# 🚀  ЗАПУСК
+# ============================================================
+
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("done", done_command))
     app.add_handler(CommandHandler("status", status_command))
